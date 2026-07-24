@@ -8,7 +8,7 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.websearch_agent.tools import web_search
+from src.websearch_agent.tools import calculator, web_search
 
 
 def _mock_ddgs(results):
@@ -98,3 +98,54 @@ def test_web_search_type_hints():
     assert hints["query"] is str
     assert hints["max_results"] is int
     assert hints["return"] == list[str]
+
+
+def test_calculator_basic_arithmetic():
+    """Test basic arithmetic operations."""
+    assert calculator("2 + 3") == "5"
+    assert calculator("10 - 4") == "6"
+    assert calculator("6 * 7") == "42"
+    assert calculator("15 / 4") == "3.75"
+    assert calculator("15 // 4") == "3"
+    assert calculator("15 % 4") == "3"
+    assert calculator("2 ** 10") == "1024"
+
+
+def test_calculator_precedence_and_parentheses():
+    """Test operator precedence and grouping."""
+    assert calculator("2 + 3 * 4") == "14"
+    assert calculator("(2 + 3) * 4") == "20"
+    assert calculator("-(2 + 3)") == "-5"
+
+
+def test_calculator_functions_and_constants():
+    """Test allowed math functions and constants."""
+    assert calculator("sqrt(16)") == "4.0"
+    assert calculator("abs(-7)") == "7"
+    assert calculator("round(3.6)") == "4"
+    assert float(calculator("pi")) == pytest.approx(3.14159, abs=1e-4)
+    assert float(calculator("cos(0)")) == 1.0
+
+
+def test_calculator_rejects_unsafe_expressions():
+    """Test that non-arithmetic expressions are rejected, not executed."""
+    assert calculator("__import__('os')").startswith("Error")
+    assert calculator("open('/etc/passwd')").startswith("Error")
+    assert calculator("[1,2][0]").startswith("Error")
+    assert calculator("'a' + 'b'").startswith("Error")
+
+
+def test_calculator_rejects_huge_exponents():
+    """Test that enormous exponents are rejected instead of hanging."""
+    assert calculator("2 ** 100000").startswith("Error")
+
+
+def test_calculator_invalid_syntax():
+    """Test that invalid syntax returns an error string, not an exception."""
+    result = calculator("2 +")
+    assert result.startswith("Error")
+
+
+def test_calculator_division_by_zero():
+    """Test that division by zero returns an error string."""
+    assert calculator("1 / 0").startswith("Error")
