@@ -4,7 +4,7 @@ from typing import Callable
 from llama_index.core.tools import FunctionTool
 from llama_index.llms.openai_like import OpenAILike
 
-from websearch_agent.tools import calculator, web_search
+from websearch_agent.tools import calculator, fetch_url, search_documents, web_search
 from websearch_agent.workflow import FunctionCallingAgent
 
 
@@ -30,6 +30,8 @@ def get_workflow_closure(
     tools = [
         FunctionTool.from_defaults(web_search),
         FunctionTool.from_defaults(calculator),
+        FunctionTool.from_defaults(fetch_url),
+        FunctionTool.from_defaults(search_documents),
     ]
     default_system_prompt = "You are a helpful AI assistant, please respond to the user's query to the best of your ability!"
     context_window = 4096

@@ -8,7 +8,12 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.websearch_agent.tools import calculator, web_search
+from src.websearch_agent.tools import (
+    calculator,
+    fetch_url,
+    search_documents,
+    web_search,
+)
 
 
 def _mock_ddgs(results):
@@ -149,3 +154,95 @@ def test_calculator_invalid_syntax():
 def test_calculator_division_by_zero():
     """Test that division by zero returns an error string."""
     assert calculator("1 / 0").startswith("Error")
+
+
+def _mock_response(text="", json_data=None, content_type="text/html"):
+    resp = MagicMock()
+    resp.text = text
+    resp.headers = {"content-type": content_type}
+    resp.json.return_value = json_data
+    resp.raise_for_status.return_value = None
+    return resp
+
+
+def test_fetch_url_strips_html():
+    """Test that HTML pages are reduced to their text content."""
+    html = "<html><head><script>evil()</script><style>x{}</style></head><body><h1>Title</h1><p>Hello   world</p></body></html>"
+    with patch("src.websearch_agent.tools.httpx.get", return_value=_mock_response(html)):
+        result = fetch_url("https://example.com")
+    assert result == "Title Hello world"
+    assert "evil" not in result
+
+
+def test_fetch_url_plain_text_passthrough():
+    """Test that non-HTML content is returned as-is."""
+    resp = _mock_response("plain text body", content_type="text/plain")
+    with patch("src.websearch_agent.tools.httpx.get", return_value=resp):
+        assert fetch_url("https://example.com/x.txt") == "plain text body"
+
+
+def test_fetch_url_truncates():
+    """Test that output is truncated to max_chars."""
+    resp = _mock_response("a" * 10000, content_type="text/plain")
+    with patch("src.websearch_agent.tools.httpx.get", return_value=resp):
+        assert len(fetch_url("https://example.com", max_chars=100)) == 100
+
+
+def test_fetch_url_coerces_max_chars():
+    """Test that a string max_chars (as LLMs send it) is accepted."""
+    resp = _mock_response("a" * 10000, content_type="text/plain")
+    with patch("src.websearch_agent.tools.httpx.get", return_value=resp):
+        assert len(fetch_url("https://example.com", max_chars="50")) == 50
+
+
+def test_fetch_url_rejects_non_http_schemes():
+    """Test that file:// and other schemes are rejected."""
+    assert fetch_url("file:///etc/passwd").startswith("Error")
+    assert fetch_url("ftp://example.com").startswith("Error")
+
+
+def test_fetch_url_network_error():
+    """Test that network failures return an error string."""
+    with patch(
+        "src.websearch_agent.tools.httpx.get", side_effect=Exception("timeout")
+    ):
+        assert fetch_url("https://example.com").startswith("Error fetching URL")
+
+
+def test_search_documents_formats_chunks():
+    """Test that matching chunks come back as 'source: passage' strings."""
+    stores = _mock_response(
+        json_data={"data": [{"id": "vs_123", "name": "knowledge_base"}]}
+    )
+    query = _mock_response(
+        json_data={
+            "chunks": [
+                {"content": "OGX runs on port 8321.", "metadata": {"document_id": "docs/00-overview.md"}}
+            ]
+        }
+    )
+    with (
+        patch("src.websearch_agent.tools.httpx.get", return_value=stores),
+        patch("src.websearch_agent.tools.httpx.post", return_value=query) as post,
+    ):
+        result = search_documents("ogx port", max_results="2")
+
+    assert result == ["docs/00-overview.md: OGX runs on port 8321."]
+    assert post.call_args.kwargs["json"]["params"]["max_chunks"] == 2
+
+
+def test_search_documents_no_store():
+    """Test the guidance message when the knowledge base doesn't exist."""
+    stores = _mock_response(json_data={"data": []})
+    with patch("src.websearch_agent.tools.httpx.get", return_value=stores):
+        result = search_documents("anything")
+    assert "No knowledge base found" in result[0]
+
+
+def test_search_documents_server_unreachable():
+    """Test that a connection error returns an error string, not an exception."""
+    with patch(
+        "src.websearch_agent.tools.httpx.get", side_effect=Exception("refused")
+    ):
+        result = search_documents("anything")
+    assert result[0].startswith("Error querying knowledge base")

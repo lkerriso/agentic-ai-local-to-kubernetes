@@ -1,8 +1,13 @@
 import ast
 import math
 import operator
+from os import getenv
 
+import httpx
+from bs4 import BeautifulSoup
 from ddgs import DDGS
+
+VECTOR_STORE_NAME = "knowledge_base"
 
 _BINARY_OPS = {
     ast.Add: operator.add,
@@ -32,6 +37,97 @@ _ALLOWED_NAMES = {
     "abs": abs,
     "round": round,
 }
+
+
+def fetch_url(url: str, max_chars: int = 4000) -> str:
+    """
+    Fetch a web page and return its readable text content.
+
+    Useful after web_search to read the full content of a result.
+
+    Args:
+        url: The http(s) URL to fetch.
+        max_chars: Maximum number of characters to return.
+
+    Returns:
+        The page's text content (HTML stripped), or an error message.
+    """
+    max_chars = int(max_chars)
+    if not url.startswith(("http://", "https://")):
+        return "Error: only http(s) URLs are supported"
+    try:
+        resp = httpx.get(
+            url,
+            follow_redirects=True,
+            timeout=15,
+            headers={"User-Agent": "websearch-agent/0.1"},
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        return f"Error fetching URL: {e}"
+
+    if "html" in resp.headers.get("content-type", ""):
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        text = " ".join(soup.get_text(" ").split())
+    else:
+        text = resp.text
+    return text[:max_chars] if text else "No text content found"
+
+
+def search_documents(query: str, max_results: int = 3) -> list[str]:
+    """
+    Search the local knowledge base for relevant document passages.
+
+    The knowledge base is a vector store served by the OGX server and
+    contains this project's documentation. Use it for questions about
+    this repository, its architecture, or its deployment process.
+
+    Args:
+        query: Natural-language query to search for.
+        max_results: Maximum number of passages to return.
+
+    Returns:
+        List of matching passages formatted as "source: passage".
+    """
+    max_results = int(max_results)
+    base_url = getenv("OGX_BASE_URL", "http://localhost:8321")
+    try:
+        stores = httpx.get(f"{base_url}/v1/vector_stores", timeout=15).json()
+        store_id = next(
+            (
+                s["id"]
+                for s in stores.get("data", [])
+                if s.get("name") == VECTOR_STORE_NAME
+            ),
+            None,
+        )
+        if not store_id:
+            return [
+                "No knowledge base found. Ingest documents first: "
+                "uv run python examples/ingest_docs.py"
+            ]
+        resp = httpx.post(
+            f"{base_url}/v1/vector-io/query",
+            json={
+                "vector_store_id": store_id,
+                "query": query,
+                "params": {"max_chunks": max_results},
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        chunks = resp.json().get("chunks", [])[:max_results]
+    except Exception as e:
+        return [f"Error querying knowledge base: {e}"]
+
+    if not chunks:
+        return ["No matching documents found."]
+    return [
+        f"{c.get('metadata', {}).get('document_id', 'unknown')}: {c.get('content', '')}"
+        for c in chunks
+    ]
 
 
 def _eval_node(node: ast.expr) -> float:
