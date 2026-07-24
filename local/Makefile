@@ -1,6 +1,7 @@
 SHELL          := bash
 ROOT_DIR       := $(shell cd .. && pwd)
 MODEL          ?= llama3.1:8b
+EMBED_MODEL    ?= all-minilm:latest
 
 .PHONY: init env ollama ogx-server run-app run-cli clean help
 
@@ -49,13 +50,15 @@ ollama: ## Install Ollama, start it, and pull models
 	  done && \
 	  echo "==> Pulling $(MODEL)..." && \
 	  ollama pull $(MODEL) && \
+	  echo "==> Pulling $(EMBED_MODEL) (embedding model required by OGX)..." && \
+	  ollama pull $(EMBED_MODEL) && \
 	  echo "" && \
 	  echo "Done. Run 'make ogx-server' in a separate terminal to start the OGX server."
 
 ogx-server: ## Install OGX and start OGX server on port 8321
 	@cd $(ROOT_DIR) && source .venv/bin/activate && set -a && source .env && set +a && \
 	  echo "==> Installing OGX..." && \
-	  uv pip install "ogx[starter]==1.1.0" "ogx-api==1.1.0" ollama "pymilvus==2.6.9" "milvus-lite>=2.5.1" "setuptools>=80.9.0,<82.0.0" && \
+	  uv pip install "ogx[starter]==1.1.0" "ogx-api==1.1.0" ollama "pymilvus==2.6.9" "milvus-lite>=2.5.1,<3" "setuptools>=80.9.0,<82.0.0" && \
 	  mkdir -p milvus_data && \
 	  echo "==> Killing any existing process on port 8321..." && \
 	  lsof -ti:8321 | xargs kill -9 2>/dev/null; true && \
