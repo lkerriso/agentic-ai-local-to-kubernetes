@@ -38,12 +38,26 @@ def chunk_text(text: str, size: int = CHUNK_SIZE) -> list[str]:
     return chunks
 
 
+def store_is_usable(client: httpx.Client, store_id: str) -> bool:
+    """Probe the store via vector-io; OGX restarts can orphan store records
+    (the registry survives in sqlite but the vector-io index mapping is lost
+    when the configured persistence backend is unavailable)."""
+    resp = client.post(
+        "/v1/vector-io/query",
+        json={"vector_store_id": store_id, "query": "probe"},
+    )
+    return resp.status_code == 200
+
+
 def get_or_create_store(client: httpx.Client) -> str:
     stores = client.get("/v1/vector_stores").json()
     for store in stores.get("data", []):
         if store.get("name") == VECTOR_STORE_NAME:
-            print(f"Using existing vector store {store['id']}")
-            return store["id"]
+            if store_is_usable(client, store["id"]):
+                print(f"Using existing vector store {store['id']}")
+                return store["id"]
+            print(f"Deleting orphaned vector store {store['id']} (re-ingesting)")
+            client.delete(f"/v1/vector_stores/{store['id']}").raise_for_status()
     resp = client.post(
         "/v1/vector_stores",
         json={
