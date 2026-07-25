@@ -1,128 +1,248 @@
 import inspect
 import os
 import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.websearch_agent.tools import dummy_web_search
+from src.websearch_agent.tools import (
+    calculator,
+    fetch_url,
+    search_documents,
+    web_search,
+)
 
 
-def test_dummy_web_search_exists():
-    """Test that the dummy_web_search function is properly defined."""
-    assert dummy_web_search is not None
-    assert callable(dummy_web_search)
+def _mock_ddgs(results):
+    """Build a mock DDGS context manager returning the given text results."""
+    instance = MagicMock()
+    instance.text.return_value = results
+    ddgs = MagicMock()
+    ddgs.return_value.__enter__.return_value = instance
+    ddgs.return_value.__exit__.return_value = False
+    return ddgs, instance
 
 
-def test_dummy_web_search_basic_invocation():
-    """Test that dummy_web_search can be called with a string query."""
-    query = "RedHat"
-    result = dummy_web_search(query)
+def test_web_search_exists():
+    """Test that the web_search function is properly defined."""
+    assert web_search is not None
+    assert callable(web_search)
 
-    # Assertions
+
+def test_web_search_basic_invocation():
+    """Test that web_search can be called with a string query."""
+    ddgs, instance = _mock_ddgs(
+        [{"title": "Red Hat", "href": "https://redhat.com", "body": "Open source"}]
+    )
+    with patch("src.websearch_agent.tools.DDGS", ddgs):
+        result = web_search("RedHat")
+
     assert isinstance(result, list)
-    assert len(result) > 0
-    assert "RedHat" in result[0]
-
-
-def test_dummy_web_search_return_type():
-    """Test that dummy_web_search returns a list of strings."""
-    result = dummy_web_search("test query")
-
-    # Should return a list
-    assert isinstance(result, list)
-    # All elements should be strings
-    for item in result:
-        assert isinstance(item, str)
-
-
-def test_dummy_web_search_return_value():
-    """Test that dummy_web_search returns the expected static value."""
-    result = dummy_web_search("any query")
-
-    # Should always return ["RedHat"]
-    assert result == ["RedHat"]
     assert len(result) == 1
-    assert result[0] == "RedHat"
+    assert "Red Hat" in result[0]
+    assert "https://redhat.com" in result[0]
+    instance.text.assert_called_once_with("RedHat", max_results=5)
 
 
-def test_dummy_web_search_with_different_queries():
-    """Test that dummy_web_search works with different query strings."""
-    queries = ["OpenShift", "LangGraph", "artificial intelligence", "test", "123"]
+def test_web_search_return_type():
+    """Test that web_search returns a list of strings."""
+    ddgs, _ = _mock_ddgs(
+        [
+            {"title": "A", "href": "https://a.com", "body": "aaa"},
+            {"title": "B", "href": "https://b.com", "body": "bbb"},
+        ]
+    )
+    with patch("src.websearch_agent.tools.DDGS", ddgs):
+        result = web_search("test query")
 
-    for query in queries:
-        result = dummy_web_search(query)
-        assert isinstance(result, list)
-        assert result == ["RedHat"]  # Always returns same static value
-
-
-def test_dummy_web_search_with_empty_query():
-    """Test dummy_web_search behavior with empty string."""
-    result = dummy_web_search("")
-
-    # Even with empty query, should return the static response
     assert isinstance(result, list)
-    assert result == ["RedHat"]
+    assert all(isinstance(item, str) for item in result)
 
 
-def test_dummy_web_search_with_special_characters():
-    """Test dummy_web_search with special characters in query."""
-    special_queries = [
-        "query with spaces",
-        "query-with-dashes",
-        "query_with_underscores",
-        "query@with#symbols",
-        "query\nwith\nnewlines",
-    ]
+def test_web_search_max_results_passthrough():
+    """Test that max_results is forwarded to the search client."""
+    ddgs, instance = _mock_ddgs([])
+    with patch("src.websearch_agent.tools.DDGS", ddgs):
+        result = web_search("query", max_results=3)
 
-    for query in special_queries:
-        result = dummy_web_search(query)
-        assert result == ["RedHat"]
+    assert result == []
+    instance.text.assert_called_once_with("query", max_results=3)
 
 
-def test_dummy_web_search_deterministic():
-    """Test that dummy_web_search always returns the same result."""
-    query = "test"
-    result1 = dummy_web_search(query)
-    result2 = dummy_web_search(query)
-    result3 = dummy_web_search(query)
+def test_web_search_handles_missing_fields():
+    """Test that results missing title/href/body do not raise."""
+    ddgs, _ = _mock_ddgs([{}])
+    with patch("src.websearch_agent.tools.DDGS", ddgs):
+        result = web_search("query")
 
-    # All calls should return identical results
-    assert result1 == result2 == result3
-    assert result1 == ["RedHat"]
+    assert result == [" |  | "]
 
 
-def test_dummy_web_search_docstring():
-    """Test that dummy_web_search has proper documentation."""
-    assert dummy_web_search.__doc__ is not None
-    assert "Web search" in dummy_web_search.__doc__
-    assert "Args:" in dummy_web_search.__doc__
-    assert "Returns:" in dummy_web_search.__doc__
+def test_web_search_docstring():
+    """Test that web_search has proper documentation."""
+    assert web_search.__doc__ is not None
+    assert "Search the web" in web_search.__doc__
+    assert "Args:" in web_search.__doc__
+    assert "Returns:" in web_search.__doc__
 
 
-def test_dummy_web_search_function_signature():
-    """Test that dummy_web_search has the correct function signature."""
-    # Get function signature
-    sig = inspect.signature(dummy_web_search)
-    params = list(sig.parameters.keys())
-
-    # Should have exactly one parameter named 'query'
-    assert len(params) == 1
-    assert params[0] == "query"
+def test_web_search_function_signature():
+    """Test that web_search has the correct function signature."""
+    sig = inspect.signature(web_search)
+    params = list(sig.parameters)
+    assert params == ["query", "max_results"]
+    assert sig.parameters["max_results"].default == 5
 
 
-def test_dummy_web_search_type_hints():
-    """Test that dummy_web_search has proper type hints."""
-    # Get type hints
-    hints = inspect.get_annotations(dummy_web_search)
-
-    # Should have type hints for query and return
-    assert "query" in hints
-    assert "return" in hints
+def test_web_search_type_hints():
+    """Test that web_search has proper type hints."""
+    hints = inspect.get_annotations(web_search)
     assert hints["query"] is str
+    assert hints["max_results"] is int
+    assert hints["return"] == list[str]
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+def test_calculator_basic_arithmetic():
+    """Test basic arithmetic operations."""
+    assert calculator("2 + 3") == "5"
+    assert calculator("10 - 4") == "6"
+    assert calculator("6 * 7") == "42"
+    assert calculator("15 / 4") == "3.75"
+    assert calculator("15 // 4") == "3"
+    assert calculator("15 % 4") == "3"
+    assert calculator("2 ** 10") == "1024"
+
+
+def test_calculator_precedence_and_parentheses():
+    """Test operator precedence and grouping."""
+    assert calculator("2 + 3 * 4") == "14"
+    assert calculator("(2 + 3) * 4") == "20"
+    assert calculator("-(2 + 3)") == "-5"
+
+
+def test_calculator_functions_and_constants():
+    """Test allowed math functions and constants."""
+    assert calculator("sqrt(16)") == "4.0"
+    assert calculator("abs(-7)") == "7"
+    assert calculator("round(3.6)") == "4"
+    assert float(calculator("pi")) == pytest.approx(3.14159, abs=1e-4)
+    assert float(calculator("cos(0)")) == 1.0
+
+
+def test_calculator_rejects_unsafe_expressions():
+    """Test that non-arithmetic expressions are rejected, not executed."""
+    assert calculator("__import__('os')").startswith("Error")
+    assert calculator("open('/etc/passwd')").startswith("Error")
+    assert calculator("[1,2][0]").startswith("Error")
+    assert calculator("'a' + 'b'").startswith("Error")
+
+
+def test_calculator_rejects_huge_exponents():
+    """Test that enormous exponents are rejected instead of hanging."""
+    assert calculator("2 ** 100000").startswith("Error")
+
+
+def test_calculator_invalid_syntax():
+    """Test that invalid syntax returns an error string, not an exception."""
+    result = calculator("2 +")
+    assert result.startswith("Error")
+
+
+def test_calculator_division_by_zero():
+    """Test that division by zero returns an error string."""
+    assert calculator("1 / 0").startswith("Error")
+
+
+def _mock_response(text="", json_data=None, content_type="text/html"):
+    resp = MagicMock()
+    resp.text = text
+    resp.headers = {"content-type": content_type}
+    resp.json.return_value = json_data
+    resp.raise_for_status.return_value = None
+    return resp
+
+
+def test_fetch_url_strips_html():
+    """Test that HTML pages are reduced to their text content."""
+    html = "<html><head><script>evil()</script><style>x{}</style></head><body><h1>Title</h1><p>Hello   world</p></body></html>"
+    with patch("src.websearch_agent.tools.httpx.get", return_value=_mock_response(html)):
+        result = fetch_url("https://example.com")
+    assert result == "Title Hello world"
+    assert "evil" not in result
+
+
+def test_fetch_url_plain_text_passthrough():
+    """Test that non-HTML content is returned as-is."""
+    resp = _mock_response("plain text body", content_type="text/plain")
+    with patch("src.websearch_agent.tools.httpx.get", return_value=resp):
+        assert fetch_url("https://example.com/x.txt") == "plain text body"
+
+
+def test_fetch_url_truncates():
+    """Test that output is truncated to max_chars."""
+    resp = _mock_response("a" * 10000, content_type="text/plain")
+    with patch("src.websearch_agent.tools.httpx.get", return_value=resp):
+        assert len(fetch_url("https://example.com", max_chars=100)) == 100
+
+
+def test_fetch_url_coerces_max_chars():
+    """Test that a string max_chars (as LLMs send it) is accepted."""
+    resp = _mock_response("a" * 10000, content_type="text/plain")
+    with patch("src.websearch_agent.tools.httpx.get", return_value=resp):
+        assert len(fetch_url("https://example.com", max_chars="50")) == 50
+
+
+def test_fetch_url_rejects_non_http_schemes():
+    """Test that file:// and other schemes are rejected."""
+    assert fetch_url("file:///etc/passwd").startswith("Error")
+    assert fetch_url("ftp://example.com").startswith("Error")
+
+
+def test_fetch_url_network_error():
+    """Test that network failures return an error string."""
+    with patch(
+        "src.websearch_agent.tools.httpx.get", side_effect=Exception("timeout")
+    ):
+        assert fetch_url("https://example.com").startswith("Error fetching URL")
+
+
+def test_search_documents_formats_chunks():
+    """Test that matching chunks come back as 'source: passage' strings."""
+    stores = _mock_response(
+        json_data={"data": [{"id": "vs_123", "name": "knowledge_base"}]}
+    )
+    query = _mock_response(
+        json_data={
+            "chunks": [
+                {"content": "OGX runs on port 8321.", "metadata": {"document_id": "docs/00-overview.md"}}
+            ]
+        }
+    )
+    with (
+        patch("src.websearch_agent.tools.httpx.get", return_value=stores),
+        patch("src.websearch_agent.tools.httpx.post", return_value=query) as post,
+    ):
+        result = search_documents("ogx port", max_results="2")
+
+    assert result == ["docs/00-overview.md: OGX runs on port 8321."]
+    assert post.call_args.kwargs["json"]["params"]["max_chunks"] == 2
+
+
+def test_search_documents_no_store():
+    """Test the guidance message when the knowledge base doesn't exist."""
+    stores = _mock_response(json_data={"data": []})
+    with patch("src.websearch_agent.tools.httpx.get", return_value=stores):
+        result = search_documents("anything")
+    assert "No knowledge base found" in result[0]
+
+
+def test_search_documents_server_unreachable():
+    """Test that a connection error returns an error string, not an exception."""
+    with patch(
+        "src.websearch_agent.tools.httpx.get", side_effect=Exception("refused")
+    ):
+        result = search_documents("anything")
+    assert result[0].startswith("Error querying knowledge base")
