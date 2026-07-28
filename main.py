@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from os import getenv
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -96,6 +96,10 @@ class ChatCompletionResponse(BaseModel):
     model: str = Field(..., description="The model used for the chat completion.")
     choices: list[Choice] = Field(..., description="A list of chat completion choices.")
 
+    context: list[dict] | None = Field(
+        None,
+        description="The full message trace (user, assistant, tool) that led to the final answer.",
+    )
     usage: dict | None = Field(
         None, description="Usage statistics for the completion request."
     )
@@ -251,12 +255,14 @@ def _make_completion_id() -> str:
     return f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
 
-@app.post(
+v1_router = APIRouter(prefix="/v1", tags=["Chat"])
+
+
+@v1_router.post(
     "/chat/completions",
     response_model=ChatCompletionResponse,
     summary="Create chat completion",
     description="Creates a model response for the given chat conversation. When `stream=false`, returns a complete `chat.completion` JSON object. When `stream=true`, returns Server-Sent Events with `chat.completion.chunk` deltas.",
-    tags=["Chat"],
 )
 async def chat_completions(request: ChatCompletionRequest):
     global get_agent
@@ -464,6 +470,9 @@ async def health():
     if not initialized:
         return JSONResponse(status_code=503, content=body)
     return body
+
+
+app.include_router(v1_router)
 
 
 # ── Playground API aliases (so the same index.html works in both modes) ───────
