@@ -33,7 +33,7 @@ class ChatMessage(BaseModel):
     content: str = Field(
         ...,
         description="The contents of the message.",
-        examples=["Which company is consider the best?"],
+        examples=["Which company is considered the best?"],
     )
 
 
